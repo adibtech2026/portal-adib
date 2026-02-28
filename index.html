@@ -1,0 +1,148 @@
+﻿<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADIB TECH - SISTEMA CENTRALIZADO</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Roboto', sans-serif; }
+        :root { --azul: #00263e; --ouro: #c5a059; --bg: #f4f7f6; --danger: #dc3545; }
+        body { display: flex; background: var(--bg); min-height: 100vh; }
+        .sidebar { width: 260px; background: var(--azul); color: white; position: fixed; height: 100%; display: flex; flex-direction: column; z-index: 1000; }
+        .brand { padding: 25px 20px; text-align: center; background: white; border-bottom: 3px solid var(--ouro); }
+        .brand img { max-width: 100%; height: auto; }
+        .unit-selector { padding: 20px; background: #003659; border-bottom: 1px solid #004a7a; }
+        .unit-selector label { font-size: 10px; color: var(--ouro); font-weight: bold; display: block; margin-bottom: 8px; }
+        .unit-selector select { width: 100%; background: #001a2b; color: white; border: 1px solid var(--ouro); padding: 10px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .main-content { margin-left: 260px; flex-grow: 1; padding: 40px; }
+        header { background: white; padding: 18px 40px; margin: -40px -40px 40px -40px; border-bottom: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center; }
+        .status { font-size: 11px; font-weight: bold; }
+        .card { background: white; padding: 25px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .search-box { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; outline: none; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px; background: #f8f9fa; color: var(--azul); font-size: 10px; text-transform: uppercase; border-bottom: 2px solid var(--ouro); }
+        td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+        .badge-zero { background: var(--danger); color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
+        .btn-refresh { cursor: pointer; background: none; border: none; color: var(--ouro); font-weight: bold; font-size: 11px; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="brand">
+            <img src="https://github.com/adibtech2026/Gestaodepuxada/blob/main/Logo%20Marca%20Vetorizada%20-%20Adib%20+%20AB%20in%20Bev%202025.png?raw=true" alt="Adib">
+        </div>
+        <div class="unit-selector">
+            <label>FILIAL ATUAL</label>
+            <select id="select-unidade" onchange="carregarDados()">
+                <option value="Sede">Sede</option>
+                <option value="Vera Cruz">Filial Vera Cruz</option>
+                <option value="Morro">Filial Morro de São Paulo</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <header>
+            <span class="status" id="status-label" style="color: orange;">● SINCRONIZANDO...</span>
+            <button class="btn-refresh" onclick="carregarDados()">🔄 ATUALIZAR AGORA</button>
+        </header>
+
+        <div class="card">
+            <h3 id="txt-unidade" style="margin-bottom: 15px;">Estoque Online</h3>
+            <input type="text" id="filtro" class="search-box" onkeyup="filtrar()" placeholder="Procurar produto ou código...">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cód</th>
+                        <th>Descrição</th>
+                        <th>Inic.</th>
+                        <th>Ent.</th>
+                        <th>Saídas</th>
+                        <th>Disp.</th>
+                    </tr>
+                </thead>
+                <tbody id="tabela-corpo">
+                    <tr><td colspan="6" style="text-align:center; padding:50px;">Carregando...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const SHEET_ID = '1IhsAvFRdMk3TV8JdqFnj0CwRErl8msZuslrSi6QMFnE';
+
+        async function carregarDados() {
+            if (window.location.protocol === 'file:') {
+                alert("AVISO: O sistema não funciona abrindo o arquivo direto da pasta. Você precisa subir para o GitHub primeiro!");
+            }
+
+            const unidade = document.getElementById('select-unidade').value;
+            const statusLabel = document.getElementById('status-label');
+            const tabela = document.getElementById('tabela-corpo');
+            
+            statusLabel.innerText = "● SINCRONIZANDO...";
+            statusLabel.style.color = "orange";
+
+            const base = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?`;
+            const url = `${base}&sheet=${encodeURIComponent(unidade)}&tqx=out:json`;
+
+            try {
+                const response = await fetch(url);
+                const text = await response.text();
+                const jsonText = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/);
+                const data = JSON.parse(jsonText[1]);
+                const rows = data.table.rows;
+                
+                let html = "";
+                
+                rows.forEach((row, index) => {
+                    if (index === 0) return; 
+                    const c = row.c;
+                    
+                    // Mapeamento baseado no seu CSV:
+                    // B(1)=Cod, C(2)=Desc, E(4)=Inic, F(5)=Ent, J(9)=Saidas, L(11)=Disp
+                    const getVal = (idx) => (c[idx] && c[idx].v !== null) ? c[idx].v : "0";
+                    
+                    const cod   = String(getVal(1)).replace(/^0+/, ''); // Coluna B
+                    const desc  = getVal(2); // Coluna C
+                    const inic  = getVal(4); // Coluna E
+                    const ent   = getVal(5); // Coluna F
+                    const sai   = getVal(9); // Coluna J
+                    const disp  = getVal(11); // Coluna L
+                    const dispNum = parseFloat(disp) || 0;
+
+                    html += `
+                        <tr style="${dispNum <= 0 ? 'background:#fff5f5' : ''}">
+                            <td>${cod}</td>
+                            <td>${desc}</td>
+                            <td>${inic}</td>
+                            <td>${ent}</td>
+                            <td>${sai}</td>
+                            <td><span class="${dispNum <= 0 ? 'badge-zero' : ''}">${disp}</span></td>
+                        </tr>`;
+                });
+
+                tabela.innerHTML = html;
+                statusLabel.innerText = "● CONECTADO";
+                statusLabel.style.color = "#27ae60";
+
+            } catch (error) {
+                statusLabel.innerText = "● ERRO";
+                statusLabel.style.color = "red";
+                tabela.innerHTML = "<tr><td colspan='6' style='text-align:center;'>Erro ao carregar dados. Verifique o GitHub ou a Planilha.</td></tr>";
+            }
+        }
+
+        function filtrar() {
+            const val = document.getElementById('filtro').value.toLowerCase();
+            document.querySelectorAll('#tabela-corpo tr').forEach(tr => {
+                tr.style.display = tr.innerText.toLowerCase().includes(val) ? "" : "none";
+            });
+        }
+
+        window.onload = carregarDados;
+    </script>
+</body>
+</html>
