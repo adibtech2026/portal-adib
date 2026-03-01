@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-pt">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -26,11 +26,10 @@
         .brand { padding: 25px 20px; text-align: center; background: var(--branco); border-bottom: 3px solid var(--dourado); }
         .brand img { max-width: 100%; height: auto; }
         .unit-selector { padding: 20px; background: var(--azul-active); border-bottom: 1px solid #004671; }
-        .unit-selector label { font-size: 11px; color: var(--dourado); text-transform: uppercase; font-weight: bold; display: block; margin-bottom: 8px; }
         .unit-selector select { width: 100%; background: #001a2b; color: #ffffff; border: 1px solid var(--dourado); padding: 10px; border-radius: 4px; font-size: 13px; font-weight: bold; outline: none; cursor: pointer; }
 
         .nav-menu { flex-grow: 1; padding-top: 15px; }
-        .nav-item { padding: 18px 25px; cursor: pointer; transition: 0.3s; display: flex; align-items: center; color: rgba(236, 240, 241, 0.7); font-size: 11px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px; border-left: 4px solid transparent; }
+        .nav-item { padding: 18px 25px; cursor: pointer; transition: 0.3s; display: flex; align-items: center; color: rgba(236, 240, 241, 0.7); font-size: 11px; text-transform: uppercase; font-weight: bold; border-left: 4px solid transparent; }
         .nav-item:hover { background: rgba(255,255,255,0.05); color: white; }
         .nav-item.active { background: var(--azul-active); color: white; border-left: 4px solid var(--dourado); }
 
@@ -72,7 +71,6 @@
             <img src="https://github.com/adibtech2026/Gestaodepuxada/blob/main/Logo%20Marca%20Vetorizada%20-%20Adib%20+%20AB%20in%20Bev%202025.png?raw=true" alt="Adib">
         </div>
         <div class="unit-selector">
-            <label>Unidade</label>
             <select id="select-unidade" onchange="trocarUnidade()">
                 <option value="Sede">Sede</option>
                 <option value="Vera Cruz">Filial Vera Cruz</option>
@@ -110,9 +108,9 @@
 
         <section id="aba-validades" class="aba">
             <div class="card">
-                <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Pesquisar por produto vencendo...">
+                <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Pesquisar por produto ou validade...">
                 <table>
-                    <thead><tr><th>Cód</th><th>Produto</th><th>Data de Vencimento</th><th>Qtd Lote</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Cód</th><th>Produto</th><th>Data Vencimento</th><th>Qtd Lote</th><th>Status</th></tr></thead>
                     <tbody id="corpo-validades"></tbody>
                 </table>
             </div>
@@ -151,14 +149,16 @@
             const label = document.getElementById('sync-label');
             label.innerText = "● SINCRONIZANDO..."; label.style.color = "orange";
             try {
-                // 1. CARREGA ESTOQUE (Mantido intacto do código que deu super certo)
+                // 1. CARREGAR ESTOQUE (Mantido do que já funcionava)
                 const resEst = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(unidadeAtual)}`);
                 const jsonEstText = await resEst.text();
                 const jsonEst = JSON.parse(jsonEstText.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
                 processarEstoque(jsonEst.table);
 
-                // 2. CARREGA VALIDADES (Via CSV para forçar leitura de Texto em vez de código da Data)
-                const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validades`);
+                // 2. CARREGAR VALIDADES (A MÁGICA ACONTECE AQUI: Consulta SQL para pegar só Colunas A, B, D e F em texto puro CSV)
+                const queryValidades = encodeURIComponent("SELECT A, B, D, F");
+                const urlValidades = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validades&tq=${queryValidades}`;
+                const resVal = await fetch(urlValidades);
                 const csvVal = await resVal.text();
                 const dadosCSV = Papa.parse(csvVal).data;
                 processarValidades(dadosCSV);
@@ -189,31 +189,31 @@
 
         function processarValidades(linhas) {
             const hoje = new Date();
-            hoje.setHours(0,0,0,0); // Zera a hora
+            hoje.setHours(0,0,0,0);
             validadesGeral = [];
 
-            // Começa a ler a partir da linha 1 (ignora o cabeçalho na linha 0)
-            for (let i = 1; i < linhas.length; i++) {
+            // Como usamos a "Query SQL", as colunas do arquivo agora são SEMPRE:
+            // 0 = A (Cod), 1 = B (Produto), 2 = D (Qtd), 3 = F (Data)
+            for (let i = 1; i < linhas.length; i++) { // Pula a linha 0 (cabeçalho)
                 const row = linhas[i];
-                if (!row || row.length < 6) continue; // Precisa ter dados até a Coluna F
+                if (!row || row.length < 4) continue;
 
-                // A=0, B=1, C=2, D=3, E=4, F=5
                 const cod = String(row[0] || "").trim().replace(/^0+/, '');
                 const prod = String(row[1] || "").trim();
-                const qtd = String(row[3] || "0").trim(); // Quantidade na Coluna D
-                const dataStr = String(row[5] || "").trim(); // Data na Coluna F
+                const qtd = String(row[2] || "0").trim(); // Agora Qtd é garantidamente o índice 2
+                const dataStr = String(row[3] || "").trim(); // Agora Data é garantidamente o índice 3
 
                 if (!cod || !dataStr || dataStr.toLowerCase() === "data") continue;
 
-                // Converte a string (ex: 28/11/2001) num formato que o Javascript entenda
-                let partes = dataStr.replace(/-/g, '/').split('/');
+                // Transforma "28/11/2001" num formato que a máquina conte os dias
+                let partes = dataStr.split(' ')[0].split('/'); // Pega só a data se houver hora junta
                 let dias = 999;
 
                 if (partes.length === 3) {
                     let dia = parseInt(partes[0]);
-                    let mes = parseInt(partes[1]) - 1; // Meses vão de 0 a 11 no código
+                    let mes = parseInt(partes[1]) - 1; // O Javascript conta meses do 0 ao 11
                     let ano = parseInt(partes[2]);
-                    if (ano < 100) ano += 2000; // Converte ano "25" para "2025"
+                    if (ano < 100) ano += 2000; // Corrige se o ano vier como "25" ao invés de "2025"
 
                     let dataObjeto = new Date(ano, mes, dia);
                     dias = Math.ceil((dataObjeto - hoje) / (1000 * 60 * 60 * 24));
@@ -222,13 +222,13 @@
                 validadesGeral.push({ cod, prod, venc: dataStr, qtd, dias });
             }
 
-            // Ordena os que vão vencer primeiro para o topo
+            // Coloca os que vencem primeiro no topo da lista
             validadesGeral.sort((a, b) => a.dias - b.dias);
             render();
         }
 
         function render() {
-            // Renderiza Estoque
+            // Desenhar Estoque
             const cEst = document.getElementById('corpo-estoque'); cEst.innerHTML = "";
             let z = 0;
             estoqueGeral.forEach(i => {
@@ -236,8 +236,9 @@
                 if(n<=0) z++;
                 cEst.innerHTML += `<tr class="${n<=0?'row-danger':''}"><td>${i.cod}</td><td>${i.desc}</td><td>${i.inic}</td><td>${i.ent}</td><td>${i.sai}</td><td><span class="badge ${n<=0?'bg-danger':'bg-success'}">${i.disp}</span></td></tr>`;
             });
+            document.getElementById('kpi-zerados').innerText = z;
 
-            // Renderiza Validades
+            // Desenhar Validades
             const cVal = document.getElementById('corpo-validades'); cVal.innerHTML = "";
             let urg = 0, atn = 0;
             
@@ -246,10 +247,9 @@
                 if(i.dias <= 30) { cl="row-danger"; cb="bg-danger"; st="URGENTE"; urg++; }
                 else if(i.dias <= 60) { cl="row-warning"; cb="bg-warning"; st="ATENÇÃO"; atn++; }
                 
-                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.prod}</td><td>${i.venc}</td><td>${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
+                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.prod}</td><td>${i.venc}</td><td style="font-weight:bold;">${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
             });
 
-            document.getElementById('kpi-zerados').innerText = z;
             document.getElementById('kpi-urgente').innerText = urg;
             document.getElementById('kpi-atencao').innerText = atn;
         }
