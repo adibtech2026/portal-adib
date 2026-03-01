@@ -53,8 +53,8 @@
         th { text-align: left; padding: 12px; background: #f8f9fa; color: var(--azul-escuro); font-size: 10px; text-transform: uppercase; border-bottom: 2px solid var(--dourado); }
         td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
 
-        .row-critico { background-color: #fff5f5 !important; }
-        .row-alerta { background-color: #fffdf0 !important; }
+        .row-danger { background-color: #fff5f5 !important; }
+        .row-warning { background-color: #fffdf0 !important; }
         .badge { padding: 4px 8px; border-radius: 3px; font-weight: bold; font-size: 11px; color: white; }
         .bg-danger { background: var(--danger); }
         .bg-warning { background: var(--warning); color: #856404; }
@@ -70,7 +70,7 @@
             <img src="https://github.com/adibtech2026/Gestaodepuxada/blob/main/Logo%20Marca%20Vetorizada%20-%20Adib%20+%20AB%20in%20Bev%202025.png?raw=true" alt="Adib">
         </div>
         <div class="unit-selector">
-            <label>Filial</label>
+            <label>Unidade</label>
             <select id="select-unidade" onchange="trocarUnidade()">
                 <option value="Sede">Sede</option>
                 <option value="Vera Cruz">Filial Vera Cruz</option>
@@ -108,9 +108,9 @@
 
         <section id="aba-validades" class="aba">
             <div class="card">
-                <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Filtrar validades...">
+                <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Pesquisar por produto na validade...">
                 <table>
-                    <thead><tr><th>Cód</th><th>Produto</th><th>Vencimento</th><th>Qtd Lote</th><th>Restam</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Cód</th><th>Produto</th><th>Vencimento</th><th>Qtd Lote</th><th>Status</th></tr></thead>
                     <tbody id="corpo-validades"></tbody>
                 </table>
             </div>
@@ -149,11 +149,9 @@
             const label = document.getElementById('sync-label');
             label.innerText = "● SINCRONIZANDO..."; label.style.color = "orange";
             try {
-                // Busca Estoque da Filial
                 const resEst = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(unidadeAtual)}`);
                 const jsonEst = JSON.parse((await resEst.text()).match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
                 
-                // Busca Aba Validades
                 const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Validades`);
                 const jsonVal = JSON.parse((await resVal.text()).match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
 
@@ -163,24 +161,26 @@
         }
 
         function processar(tabEst, tabVal) {
-            // Processar Estoque
+            // Estoque Online (Referência Original Mantida)
             const mapa = {}; tabEst.cols.forEach((c,i) => { if(c.label) mapa[c.label.toLowerCase().trim()] = i; });
             estoqueGeral = tabEst.rows.map(r => {
                 const get = (l) => (mapa[l]!==undefined && r.c[mapa[l]]) ? (r.c[mapa[l]].f || String(r.c[mapa[l]].v)) : "0";
                 return { cod: get("cod").replace(/^0+/, ''), desc: get("descricao"), inic: get("inicial"), ent: get("ent"), sai: get("saidas"), disp: get("disp") };
             }).filter(i => i.cod !== "Cod" && i.cod !== "Grade");
 
-            // Processar Validades
+            // Validades (Ajustado conforme solicitação)
             const hoje = new Date();
             validadesGeral = tabVal.rows.map((r, idx) => {
-                if(idx === 0 || !r.c || !r.c[2]) return null;
-                const dv = new Date(r.c[2].v);
+                // Coluna A(0)=Cod | Coluna B(1)=Produto | Coluna D(3)=Qtd | Coluna F(5)=Data
+                if(idx === 0 || !r.c || !r.c[5]) return null;
+                
+                const dv = new Date(r.c[5].v); // Data na Coluna F
                 const dias = Math.ceil((dv - hoje) / (1000*60*60*24));
                 return { 
                     cod: r.c[0] ? String(r.c[0].v).replace(/^0+/, '') : "", 
                     prod: r.c[1] ? r.c[1].v : "", 
-                    venc: r.c[2].f, 
-                    qtd: r.c[3] ? r.c[3].v : "0", 
+                    venc: r.c[5].f, // Data formatada da Coluna F
+                    qtd: r.c[3] ? r.c[3].f || r.c[3].v : "0", // Quantidade na Coluna D
                     dias 
                 };
             }).filter(i => i !== null).sort((a,b) => a.dias - b.dias);
@@ -189,7 +189,6 @@
         }
 
         function render() {
-            // Render Estoque
             const cEst = document.getElementById('corpo-estoque'); cEst.innerHTML = "";
             let z = 0;
             estoqueGeral.forEach(i => {
@@ -198,14 +197,14 @@
                 cEst.innerHTML += `<tr class="${n<=0?'row-danger':''}"><td>${i.cod}</td><td>${i.desc}</td><td>${i.inic}</td><td>${i.ent}</td><td>${i.sai}</td><td><span class="badge ${n<=0?'bg-danger':'bg-success'}">${i.disp}</span></td></tr>`;
             });
 
-            // Render Validades
             const cVal = document.getElementById('corpo-validades'); cVal.innerHTML = "";
             let urg = 0, atn = 0;
             validadesGeral.forEach(i => {
                 let cl = "", cb = "bg-success", st = "SEGURO";
-                if(i.dias <= 30) { cl="row-critico"; cb="bg-danger"; st="URGENTE"; urg++; }
-                else if(i.dias <= 60) { cl="row-alerta"; cb="bg-warning"; st="ATENÇÃO"; atn++; }
-                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.prod}</td><td>${i.venc}</td><td>${i.qtd}</td><td style="font-weight:bold">${i.dias} dias</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
+                if(i.dias <= 30) { cl="row-danger"; cb="bg-danger"; st="URGENTE"; urg++; }
+                else if(i.dias <= 60) { cl="row-warning"; cb="bg-warning"; st="ATENÇÃO"; atn++; }
+                
+                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.prod}</td><td>${i.venc}</td><td>${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
             });
 
             document.getElementById('kpi-zerados').innerText = z;
