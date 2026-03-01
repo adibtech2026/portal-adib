@@ -33,7 +33,7 @@
         .nav-item:hover { background: rgba(255,255,255,0.05); color: white; }
         .nav-item.active { background: var(--azul-active); color: white; border-left: 4px solid var(--dourado); }
 
-        /* Conteúdo Principal */
+        /* Conteúdo */
         .main-content { margin-left: 260px; flex-grow: 1; padding: 40px; }
         header { background: var(--branco); padding: 18px 40px; margin: -40px -40px 40px -40px; border-bottom: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center; }
 
@@ -55,7 +55,6 @@
 
         .row-danger { background-color: #fff5f5 !important; }
         .row-warning { background-color: #fffdf0 !important; }
-
         .badge { padding: 4px 8px; border-radius: 3px; font-weight: bold; font-size: 11px; color: white; display: inline-block; }
         .bg-danger { background: var(--danger); }
         .bg-warning { background: var(--warning); color: #856404; }
@@ -71,7 +70,7 @@
             <img src="https://github.com/adibtech2026/Gestaodepuxada/blob/main/Logo%20Marca%20Vetorizada%20-%20Adib%20+%20AB%20in%20Bev%202025.png?raw=true" alt="Adib">
         </div>
         <div class="unit-selector">
-            <label>Unidade</label>
+            <label>Filial</label>
             <select id="select-unidade" onchange="trocarUnidade()">
                 <option value="Sede">Sede</option>
                 <option value="Vera Cruz">Filial Vera Cruz</option>
@@ -88,7 +87,7 @@
     <div class="main-content">
         <header>
             <span id="sync-label" style="font-size: 11px; font-weight: bold; color: orange;">● SINCRONIZANDO...</span>
-            <button onclick="carregarTudo()" style="background:none; border:1px solid var(--dourado); color:var(--dourado); padding:5px 10px; cursor:pointer; font-size:10px; font-weight:bold;">ATUALIZAR DADOS</button>
+            <button onclick="carregarTudo()" style="background:none; border:1px solid var(--dourado); color:var(--dourado); padding:5px 10px; cursor:pointer; font-size:10px; font-weight:bold;">ATUALIZAR TELA</button>
         </header>
 
         <div class="kpi-container">
@@ -99,7 +98,7 @@
 
         <section id="aba-estoque-online" class="aba active">
             <div class="card">
-                <input type="text" class="search-box" id="busca-online" onkeyup="filtrar('corpo-estoque', 'busca-online')" placeholder="Buscar no estoque...">
+                <input type="text" class="search-box" id="busca-online" onkeyup="filtrar('corpo-estoque', 'busca-online')" placeholder="Filtrar estoque...">
                 <table>
                     <thead><tr><th>Cód</th><th>Descrição</th><th>Inic.</th><th>Ent.</th><th>Saídas</th><th>Disp.</th></tr></thead>
                     <tbody id="corpo-estoque"></tbody>
@@ -109,9 +108,9 @@
 
         <section id="aba-validades" class="aba">
             <div class="card">
-                <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Buscar por produto vencendo...">
+                <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Pesquisar validades...">
                 <table>
-                    <thead><tr><th>Cód</th><th>Produto</th><th>Data de Vencimento</th><th>Qtd Lote (D)</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Cód</th><th>Produto</th><th>Data de Vencimento</th><th>Qtd Lote</th><th>Status</th></tr></thead>
                     <tbody id="corpo-validades"></tbody>
                 </table>
             </div>
@@ -162,40 +161,42 @@
         }
 
         function processar(tabEst, tabVal) {
-            // Processar Estoque Online
+            // Processar Estoque
             const mapa = {}; tabEst.cols.forEach((c,i) => { if(c.label) mapa[c.label.toLowerCase().trim()] = i; });
             estoqueGeral = tabEst.rows.map(r => {
                 const get = (l) => (mapa[l]!==undefined && r.c[mapa[l]]) ? (r.c[mapa[l]].f || String(r.c[mapa[l]].v)) : "0";
                 return { cod: get("cod").replace(/^0+/, ''), desc: get("descricao"), inic: get("inicial"), ent: get("ent"), sai: get("saidas"), disp: get("disp") };
             }).filter(i => i.cod !== "Cod" && i.cod !== "Grade");
 
-            // Processar Validades (Coluna F para Data, Coluna D para Quantidade)
+            // Processar Validades (Coluna F=5 para Data, Coluna D=3 para Qtd)
             const hoje = new Date();
             validadesGeral = tabVal.rows.map((r, idx) => {
-                // Pulamos o cabeçalho e verificamos se existe a célula da Coluna F (índice 5)
                 if(idx === 0 || !r.c || !r.c[5]) return null;
                 
-                // Pega a data formatada (28/11/2001) ou calcula do valor bruto
-                const dataFormatada = r.c[5].f || ""; 
-                const dataBruta = r.c[5].v; 
-                let dataObjeto;
-
-                // Converte valor do Google Sheets para objeto Date do JS
-                if (typeof dataBruta === 'string' && dataBruta.includes('Date')) {
-                    dataObjeto = eval("new " + dataBruta);
+                let dtObj;
+                const v = r.c[5].v;
+                
+                // Conversão de data do Google para JS
+                if (v && typeof v === 'string' && v.includes('Date')) {
+                    dtObj = eval("new " + v);
+                } else if (typeof v === 'number') {
+                    // Trata número de série do Excel/Google
+                    dtObj = new Date((v - 25569) * 86400 * 1000);
                 } else {
-                    dataObjeto = new Date(dataBruta);
+                    dtObj = new Date(v);
                 }
 
-                const diffTime = dataObjeto - hoje;
-                const diasRestantes = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                if (isNaN(dtObj)) return null;
+
+                const dias = Math.ceil((dtObj - hoje) / (1000*60*60*24));
+                const dataBR = dtObj.toLocaleDateString('pt-BR');
 
                 return { 
                     cod: r.c[0] ? String(r.c[0].v).replace(/^0+/, '') : "", 
                     prod: r.c[1] ? r.c[1].v : "", 
-                    venc: dataFormatada, 
+                    venc: dataBR, 
                     qtd: r.c[3] ? (r.c[3].f || r.c[3].v) : "0", 
-                    dias: diasRestantes 
+                    dias 
                 };
             }).filter(i => i !== null).sort((a,b) => a.dias - b.dias);
 
@@ -203,7 +204,6 @@
         }
 
         function render() {
-            // Render Estoque
             const cEst = document.getElementById('corpo-estoque'); cEst.innerHTML = "";
             let z = 0;
             estoqueGeral.forEach(i => {
@@ -212,7 +212,6 @@
                 cEst.innerHTML += `<tr class="${n<=0?'row-danger':''}"><td>${i.cod}</td><td>${i.desc}</td><td>${i.inic}</td><td>${i.ent}</td><td>${i.sai}</td><td><span class="badge ${n<=0?'bg-danger':'bg-success'}">${i.disp}</span></td></tr>`;
             });
 
-            // Render Validades
             const cVal = document.getElementById('corpo-validades'); cVal.innerHTML = "";
             let urg = 0, atn = 0;
             validadesGeral.forEach(i => {
