@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ADIB TECH - GESTÃO INTEGRADA</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <link href="https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Roboto', sans-serif; }
@@ -92,8 +91,8 @@
 
         <div class="kpi-container">
             <div class="kpi-card"><small>Ruptura (Estoque 0)</small><div id="kpi-zerados">0</div></div>
-            <div class="kpi-card" style="border-left-color: var(--danger);"><small>Urgente < 30 dias</small><div id="kpi-urgente">0</div></div>
-            <div class="kpi-card" style="border-left-color: var(--warning);"><small>Atenção < 60 dias</small><div id="kpi-atencao">0</div></div>
+            <div class="kpi-card" style="border-left-color: var(--danger);"><small>Urgente &lt; 30 dias</small><div id="kpi-urgente">0</div></div>
+            <div class="kpi-card" style="border-left-color: var(--warning);"><small>Atenção &lt; 60 dias</small><div id="kpi-atencao">0</div></div>
         </div>
 
         <section id="aba-estoque-online" class="aba active">
@@ -110,7 +109,7 @@
             <div class="card">
                 <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Pesquisar por produto ou validade...">
                 <table>
-                    <thead><tr><th>Cód</th><th>Descrição</th><th>Data Validade</th><th>Quantidade</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Cód</th><th>Produto</th><th>Data Vencimento</th><th>Qtd Lote</th><th>Status</th></tr></thead>
                     <tbody id="corpo-validades"></tbody>
                 </table>
             </div>
@@ -139,26 +138,19 @@
             const label = document.getElementById('sync-label');
             label.innerText = "● SINCRONIZANDO..."; label.style.color = "orange";
             try {
-                // 1. CARREGA ESTOQUE (Via JSON)
+                // 1. CARREGA ESTOQUE
                 const resEst = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(unidadeAtual)}`);
                 const jsonEstText = await resEst.text();
                 const jsonEst = JSON.parse(jsonEstText.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
                 processarEstoque(jsonEst.table);
 
-                // 2. CARREGA VALIDADE (Via CSV Direto, Aba "Validade" no singular!)
-                const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validade`);
-                const csvVal = await resVal.text();
-                
-                // Transforma o texto do Google Sheets numa tabela inteligente
-                Papa.parse(csvVal, {
-                    header: false,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        processarValidades(results.data);
-                        label.innerText = "● CONECTADO"; label.style.color = "#27ae60";
-                    }
-                });
+                // 2. CARREGA VALIDADE (Usando o mesmo método 100% garantido do Estoque)
+                const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Validade`);
+                const jsonValText = await resVal.text();
+                const jsonVal = JSON.parse(jsonValText.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
+                processarValidades(jsonVal.table);
 
+                label.innerText = "● CONECTADO"; label.style.color = "#27ae60";
             } catch (e) { 
                 console.error(e);
                 label.innerText = "● ERRO DE CONEXÃO"; label.style.color = "red"; 
@@ -167,7 +159,7 @@
 
         function processarEstoque(table) {
             const mapa = {}; 
-            table.cols.forEach((c,i) => { if(c.label) mapa[c.label.toLowerCase().trim()] = i; });
+            table.cols.forEach((c,i) => { if(c && c.label) mapa[c.label.toLowerCase().trim()] = i; });
             
             estoqueGeral = table.rows.map(r => {
                 const get = (l) => (mapa[l]!==undefined && r.c[mapa[l]]) ? (r.c[mapa[l]].f || String(r.c[mapa[l]].v)) : "0";
@@ -178,53 +170,65 @@
             }).filter(i => i.cod !== "Cod" && i.cod !== "Grade" && i.cod !== "");
         }
 
-        function processarValidades(linhas) {
+        function processarValidades(table) {
             const hoje = new Date();
             hoje.setHours(0,0,0,0);
             validadesGeral = [];
 
-            // De acordo com a sua nova imagem, a estrutura é:
-            // Índice 0 = Produto (Código)
-            // Índice 1 = Descricao
-            // Índice 2 = Data Validade
-            // Índice 3 = Quantidade
+            // Mapeando exatamente as colunas da sua foto
+            const mapa = {}; 
+            table.cols.forEach((c,i) => { if(c && c.label) mapa[c.label.toLowerCase().trim()] = i; });
+            
+            // Garantindo que encontre a coluna certa mesmo se houver espaço no nome
+            const idxCod = mapa['produto'] !== undefined ? mapa['produto'] : 0;
+            const idxDesc = mapa['descricao'] !== undefined ? mapa['descricao'] : 1;
+            const idxData = mapa['data validade'] !== undefined ? mapa['data validade'] : 2;
+            const idxQtd = mapa['quantidade'] !== undefined ? mapa['quantidade'] : 3;
 
-            for (let i = 1; i < linhas.length; i++) { // Pula o cabeçalho
-                const row = linhas[i];
-                if (!row || row.length < 4) continue;
+            table.rows.forEach(r => {
+                const c = r.c;
+                if (!c) return;
 
-                const cod = String(row[0] || "").trim().replace(/^0+/, '');
-                const desc = String(row[1] || "").trim();
-                const dataStr = String(row[2] || "").trim();
-                const qtd = String(row[3] || "0").trim();
+                const getVal = (idx) => (c[idx] ? (c[idx].f || String(c[idx].v)) : "");
+                
+                let cod = getVal(idxCod).replace(/^0+/, '').trim();
+                let desc = getVal(idxDesc).trim();
+                let qtd = getVal(idxQtd).trim();
+                
+                let valCell = c[idxData];
+                if (!valCell || cod === "Produto" || cod === "") return;
 
-                // Pula linhas vazias
-                if (!cod || !dataStr) continue;
-
-                // Transforma "06/09/2026" em dias restantes
-                let partes = dataStr.split(' ')[0].split('/'); 
+                let dataStr = "";
                 let dias = 999;
-
-                if (partes.length === 3) {
-                    let dia = parseInt(partes[0]);
-                    let mes = parseInt(partes[1]) - 1; // Javascript conta meses de 0 a 11
-                    let ano = parseInt(partes[2]);
-                    if (ano < 100) ano += 2000;
-
-                    let dataObjeto = new Date(ano, mes, dia);
-                    dias = Math.ceil((dataObjeto - hoje) / (1000 * 60 * 60 * 24));
+                
+                // Pega a data formatada exata que aparece na sua planilha (Ex: 06/09/2026)
+                if (valCell.f) {
+                    dataStr = valCell.f.split(' ')[0];
+                    let partes = dataStr.split('/');
+                    if (partes.length === 3) {
+                        let ano = parseInt(partes[2]);
+                        if (ano < 100) ano += 2000;
+                        let dt = new Date(ano, parseInt(partes[1]) - 1, parseInt(partes[0]));
+                        dias = Math.ceil((dt - hoje) / (1000 * 60 * 60 * 24));
+                    }
+                } else if (typeof valCell.v === 'string' && valCell.v.includes('Date')) {
+                    let dt = eval("new " + valCell.v);
+                    dataStr = dt.toLocaleDateString('pt-BR');
+                    dias = Math.ceil((dt - hoje) / (1000 * 60 * 60 * 24));
+                } else {
+                    dataStr = String(valCell.v);
                 }
 
-                validadesGeral.push({ cod, desc, venc: dataStr, qtd, dias });
-            }
+                validadesGeral.push({ cod, prod: desc, venc: dataStr, qtd, dias });
+            });
 
-            // Organiza do mais urgente pro menos urgente
+            // Organiza do mais urgente para o menos urgente
             validadesGeral.sort((a, b) => a.dias - b.dias);
             render();
         }
 
         function render() {
-            // Desenha a aba Estoque
+            // Desenha Estoque
             const cEst = document.getElementById('corpo-estoque'); cEst.innerHTML = "";
             let z = 0;
             estoqueGeral.forEach(i => {
@@ -234,7 +238,7 @@
             });
             document.getElementById('kpi-zerados').innerText = z;
 
-            // Desenha a aba Validade
+            // Desenha Validades
             const cVal = document.getElementById('corpo-validades'); cVal.innerHTML = "";
             let urg = 0, atn = 0;
             
@@ -243,7 +247,7 @@
                 if(i.dias <= 30) { cl="row-danger"; cb="bg-danger"; st="URGENTE"; urg++; }
                 else if(i.dias <= 60) { cl="row-warning"; cb="bg-warning"; st="ATENÇÃO"; atn++; }
                 
-                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.desc}</td><td>${i.venc}</td><td style="font-weight:bold;">${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
+                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.prod}</td><td>${i.venc}</td><td style="font-weight:bold;">${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
             });
 
             document.getElementById('kpi-urgente').innerText = urg;
