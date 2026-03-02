@@ -110,7 +110,7 @@
             <div class="card">
                 <input type="text" class="search-box" id="busca-validades" onkeyup="filtrar('corpo-validades', 'busca-validades')" placeholder="Pesquisar por produto ou validade...">
                 <table>
-                    <thead><tr><th>Cód</th><th>Produto</th><th>Data Vencimento</th><th>Qtd Lote</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Cód</th><th>Descrição</th><th>Data Validade</th><th>Quantidade</th><th>Status</th></tr></thead>
                     <tbody id="corpo-validades"></tbody>
                 </table>
             </div>
@@ -139,19 +139,19 @@
             const label = document.getElementById('sync-label');
             label.innerText = "● SINCRONIZANDO..."; label.style.color = "orange";
             try {
-                // 1. CARREGA ESTOQUE
+                // 1. CARREGA ESTOQUE (Via JSON)
                 const resEst = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(unidadeAtual)}`);
                 const jsonEstText = await resEst.text();
                 const jsonEst = JSON.parse(jsonEstText.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
                 processarEstoque(jsonEst.table);
 
-                // 2. CARREGA VALIDADES (Via CSV para ignorar formatos escondidos)
-                const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validades`);
+                // 2. CARREGA VALIDADE (Via CSV Direto, Aba "Validade" no singular!)
+                const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validade`);
                 const csvVal = await resVal.text();
                 
-                // MÁGICA AQUI: O header: true transforma a primeira linha em chaves dinâmicas
+                // Transforma o texto do Google Sheets numa tabela inteligente
                 Papa.parse(csvVal, {
-                    header: true,
+                    header: false,
                     skipEmptyLines: true,
                     complete: function(results) {
                         processarValidades(results.data);
@@ -161,7 +161,7 @@
 
             } catch (e) { 
                 console.error(e);
-                label.innerText = "● ERRO"; label.style.color = "red"; 
+                label.innerText = "● ERRO DE CONEXÃO"; label.style.color = "red"; 
             }
         }
 
@@ -178,31 +178,36 @@
             }).filter(i => i.cod !== "Cod" && i.cod !== "Grade" && i.cod !== "");
         }
 
-        function processarValidades(linhasJSON) {
+        function processarValidades(linhas) {
             const hoje = new Date();
             hoje.setHours(0,0,0,0);
             validadesGeral = [];
 
-            linhasJSON.forEach(row => {
-                // Função para buscar a coluna independentemente de maiúsculas/minúsculas
-                const encontrarColuna = (palavraChave) => {
-                    const chaveExata = Object.keys(row).find(k => k.toLowerCase().includes(palavraChave.toLowerCase()));
-                    return chaveExata ? row[chaveExata] : "";
-                };
+            // De acordo com a sua nova imagem, a estrutura é:
+            // Índice 0 = Produto (Código)
+            // Índice 1 = Descricao
+            // Índice 2 = Data Validade
+            // Índice 3 = Quantidade
 
-                const cod = String(encontrarColuna("cod")).trim().replace(/^0+/, '');
-                const prod = String(encontrarColuna("produto")).trim();
-                const qtd = String(encontrarColuna("qtd")).trim();
-                const dataStr = String(encontrarColuna("data")).trim();
+            for (let i = 1; i < linhas.length; i++) { // Pula o cabeçalho
+                const row = linhas[i];
+                if (!row || row.length < 4) continue;
 
-                if (!cod || !dataStr) return;
+                const cod = String(row[0] || "").trim().replace(/^0+/, '');
+                const desc = String(row[1] || "").trim();
+                const dataStr = String(row[2] || "").trim();
+                const qtd = String(row[3] || "0").trim();
 
+                // Pula linhas vazias
+                if (!cod || !dataStr) continue;
+
+                // Transforma "06/09/2026" em dias restantes
                 let partes = dataStr.split(' ')[0].split('/'); 
                 let dias = 999;
 
                 if (partes.length === 3) {
                     let dia = parseInt(partes[0]);
-                    let mes = parseInt(partes[1]) - 1; 
+                    let mes = parseInt(partes[1]) - 1; // Javascript conta meses de 0 a 11
                     let ano = parseInt(partes[2]);
                     if (ano < 100) ano += 2000;
 
@@ -210,15 +215,16 @@
                     dias = Math.ceil((dataObjeto - hoje) / (1000 * 60 * 60 * 24));
                 }
 
-                validadesGeral.push({ cod, prod, venc: dataStr, qtd, dias });
-            });
+                validadesGeral.push({ cod, desc, venc: dataStr, qtd, dias });
+            }
 
+            // Organiza do mais urgente pro menos urgente
             validadesGeral.sort((a, b) => a.dias - b.dias);
             render();
         }
 
         function render() {
-            // Estoque
+            // Desenha a aba Estoque
             const cEst = document.getElementById('corpo-estoque'); cEst.innerHTML = "";
             let z = 0;
             estoqueGeral.forEach(i => {
@@ -228,7 +234,7 @@
             });
             document.getElementById('kpi-zerados').innerText = z;
 
-            // Validades
+            // Desenha a aba Validade
             const cVal = document.getElementById('corpo-validades'); cVal.innerHTML = "";
             let urg = 0, atn = 0;
             
@@ -237,7 +243,7 @@
                 if(i.dias <= 30) { cl="row-danger"; cb="bg-danger"; st="URGENTE"; urg++; }
                 else if(i.dias <= 60) { cl="row-warning"; cb="bg-warning"; st="ATENÇÃO"; atn++; }
                 
-                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.prod}</td><td>${i.venc}</td><td style="font-weight:bold;">${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
+                cVal.innerHTML += `<tr class="${cl}"><td>${i.cod}</td><td>${i.desc}</td><td>${i.venc}</td><td style="font-weight:bold;">${i.qtd}</td><td><span class="badge ${cb}">${st}</span></td></tr>`;
             });
 
             document.getElementById('kpi-urgente').innerText = urg;
