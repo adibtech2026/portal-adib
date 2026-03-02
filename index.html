@@ -26,6 +26,7 @@
         .brand { padding: 25px 20px; text-align: center; background: var(--branco); border-bottom: 3px solid var(--dourado); }
         .brand img { max-width: 100%; height: auto; }
         .unit-selector { padding: 20px; background: var(--azul-active); border-bottom: 1px solid #004671; }
+        .unit-selector label { font-size: 11px; color: var(--dourado); text-transform: uppercase; font-weight: bold; display: block; margin-bottom: 8px; }
         .unit-selector select { width: 100%; background: #001a2b; color: #ffffff; border: 1px solid var(--dourado); padding: 10px; border-radius: 4px; font-size: 13px; font-weight: bold; outline: none; cursor: pointer; }
 
         .nav-menu { flex-grow: 1; padding-top: 15px; }
@@ -80,7 +81,6 @@
         <div class="nav-menu">
             <div class="nav-item active" onclick="navegar('estoque-online', this)">Estoque Online</div>
             <div class="nav-item" onclick="navegar('validades', this)">⚠️ Alerta de Validades</div>
-            <div class="nav-item" onclick="navegar('faltas', this)">Faltas Críticas</div>
         </div>
     </div>
 
@@ -115,16 +115,6 @@
                 </table>
             </div>
         </section>
-
-        <section id="aba-faltas" class="aba">
-            <div class="card">
-                <h3>Resumo de Rupturas</h3>
-                <table>
-                    <thead><tr><th>Cód / Produto</th><th>Estoque</th><th>Previsão</th><th>Motivo</th></tr></thead>
-                    <tbody id="corpo-faltas"></tbody>
-                </table>
-            </div>
-        </section>
     </div>
 
     <script>
@@ -149,21 +139,26 @@
             const label = document.getElementById('sync-label');
             label.innerText = "● SINCRONIZANDO..."; label.style.color = "orange";
             try {
-                // 1. CARREGAR ESTOQUE (Mantido do que já funcionava)
+                // 1. CARREGA ESTOQUE
                 const resEst = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(unidadeAtual)}`);
                 const jsonEstText = await resEst.text();
                 const jsonEst = JSON.parse(jsonEstText.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1]);
                 processarEstoque(jsonEst.table);
 
-                // 2. CARREGAR VALIDADES (A MÁGICA ACONTECE AQUI: Consulta SQL para pegar só Colunas A, B, D e F em texto puro CSV)
-                const queryValidades = encodeURIComponent("SELECT A, B, D, F");
-                const urlValidades = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validades&tq=${queryValidades}`;
-                const resVal = await fetch(urlValidades);
+                // 2. CARREGA VALIDADES (Via CSV para ignorar formatos escondidos)
+                const resVal = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Validades`);
                 const csvVal = await resVal.text();
-                const dadosCSV = Papa.parse(csvVal).data;
-                processarValidades(dadosCSV);
+                
+                // MÁGICA AQUI: O header: true transforma a primeira linha em chaves dinâmicas
+                Papa.parse(csvVal, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        processarValidades(results.data);
+                        label.innerText = "● CONECTADO"; label.style.color = "#27ae60";
+                    }
+                });
 
-                label.innerText = "● CONECTADO"; label.style.color = "#27ae60";
             } catch (e) { 
                 console.error(e);
                 label.innerText = "● ERRO"; label.style.color = "red"; 
@@ -177,58 +172,53 @@
             estoqueGeral = table.rows.map(r => {
                 const get = (l) => (mapa[l]!==undefined && r.c[mapa[l]]) ? (r.c[mapa[l]].f || String(r.c[mapa[l]].v)) : "0";
                 return { 
-                    cod: get("cod").replace(/^0+/, ''), 
-                    desc: get("descricao"), 
-                    inic: get("inicial"), 
-                    ent: get("ent"), 
-                    sai: get("saidas"), 
-                    disp: get("disp") 
+                    cod: get("cod").replace(/^0+/, ''), desc: get("descricao"), 
+                    inic: get("inicial"), ent: get("ent"), sai: get("saidas"), disp: get("disp") 
                 };
             }).filter(i => i.cod !== "Cod" && i.cod !== "Grade" && i.cod !== "");
         }
 
-        function processarValidades(linhas) {
+        function processarValidades(linhasJSON) {
             const hoje = new Date();
             hoje.setHours(0,0,0,0);
             validadesGeral = [];
 
-            // Como usamos a "Query SQL", as colunas do arquivo agora são SEMPRE:
-            // 0 = A (Cod), 1 = B (Produto), 2 = D (Qtd), 3 = F (Data)
-            for (let i = 1; i < linhas.length; i++) { // Pula a linha 0 (cabeçalho)
-                const row = linhas[i];
-                if (!row || row.length < 4) continue;
+            linhasJSON.forEach(row => {
+                // Função para buscar a coluna independentemente de maiúsculas/minúsculas
+                const encontrarColuna = (palavraChave) => {
+                    const chaveExata = Object.keys(row).find(k => k.toLowerCase().includes(palavraChave.toLowerCase()));
+                    return chaveExata ? row[chaveExata] : "";
+                };
 
-                const cod = String(row[0] || "").trim().replace(/^0+/, '');
-                const prod = String(row[1] || "").trim();
-                const qtd = String(row[2] || "0").trim(); // Agora Qtd é garantidamente o índice 2
-                const dataStr = String(row[3] || "").trim(); // Agora Data é garantidamente o índice 3
+                const cod = String(encontrarColuna("cod")).trim().replace(/^0+/, '');
+                const prod = String(encontrarColuna("produto")).trim();
+                const qtd = String(encontrarColuna("qtd")).trim();
+                const dataStr = String(encontrarColuna("data")).trim();
 
-                if (!cod || !dataStr || dataStr.toLowerCase() === "data") continue;
+                if (!cod || !dataStr) return;
 
-                // Transforma "28/11/2001" num formato que a máquina conte os dias
-                let partes = dataStr.split(' ')[0].split('/'); // Pega só a data se houver hora junta
+                let partes = dataStr.split(' ')[0].split('/'); 
                 let dias = 999;
 
                 if (partes.length === 3) {
                     let dia = parseInt(partes[0]);
-                    let mes = parseInt(partes[1]) - 1; // O Javascript conta meses do 0 ao 11
+                    let mes = parseInt(partes[1]) - 1; 
                     let ano = parseInt(partes[2]);
-                    if (ano < 100) ano += 2000; // Corrige se o ano vier como "25" ao invés de "2025"
+                    if (ano < 100) ano += 2000;
 
                     let dataObjeto = new Date(ano, mes, dia);
                     dias = Math.ceil((dataObjeto - hoje) / (1000 * 60 * 60 * 24));
                 }
 
                 validadesGeral.push({ cod, prod, venc: dataStr, qtd, dias });
-            }
+            });
 
-            // Coloca os que vencem primeiro no topo da lista
             validadesGeral.sort((a, b) => a.dias - b.dias);
             render();
         }
 
         function render() {
-            // Desenhar Estoque
+            // Estoque
             const cEst = document.getElementById('corpo-estoque'); cEst.innerHTML = "";
             let z = 0;
             estoqueGeral.forEach(i => {
@@ -238,7 +228,7 @@
             });
             document.getElementById('kpi-zerados').innerText = z;
 
-            // Desenhar Validades
+            // Validades
             const cVal = document.getElementById('corpo-validades'); cVal.innerHTML = "";
             let urg = 0, atn = 0;
             
